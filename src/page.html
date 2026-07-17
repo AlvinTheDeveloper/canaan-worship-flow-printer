@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <style>
+      body { font-family: Arial, sans-serif; margin: 20px; }
+      #songChoiceDialog { border: 1px solid #ccc; padding: 15px; background: #f9f9f9; margin-top: 20px; }
+      #songChoiceList li { margin: 5px 0; }
+      button { margin: 3px; padding: 5px 10px; }
+    </style>
+  </head>
+  <body>
+    <h2>敬拜合成譜選擇</h2>
+    <p>系統會根據流程表逐首歌檢查，如果有多個版本，會顯示候選清單讓你選擇。</p>
+
+    <div id="songChoiceDialog" style="display:none;">
+      <h3 id="songChoiceTitle"></h3>
+      <ul id="songChoiceList"></ul>
+    </div>
+
+    <button onclick="startProcess()">開始跑流程表</button>
+    <button onclick="finalizePDF()">完成並合成 PDF</button>
+
+    <script>
+      // 全域變數：存放用家選定的檔案 ID
+      var selectedFileIds = [];
+      var songList = [
+        {code:"02-021", name:"呼喊"},
+        {code:"03-015", name:"讚美"},
+        {code:"04-008", name:"主愛"}
+      ]; // 這裡放流程表的歌編號 + 名稱
+
+      var currentIndex = 0;
+
+      // 開始跑流程表
+      function startProcess() {
+        currentIndex = 0;
+        processNextSong();
+      }
+
+      // 處理下一首歌
+      function processNextSong() {
+        if (currentIndex >= songList.length) {
+          alert("流程表已全部檢查完畢，可以合成 PDF");
+          return;
+        }
+
+        var song = songList[currentIndex];
+        google.script.run.withSuccessHandler(function(res){
+          if (res.length === 1) {
+            // 只有一個檔案 → 自動加入
+            selectedFileIds.push(res[0].id);
+            alert("已自動選擇：" + res[0].name);
+            currentIndex++;
+            processNextSong();
+          } else if (res.length > 1) {
+            // 多個檔案 → 顯示候選清單
+            showSongChoices(song.name, res);
+          } else {
+            alert("找不到編號 " + song.code + " 的歌譜");
+            currentIndex++;
+            processNextSong();
+          }
+        }).findSongFiles(song.code);
+      }
+
+      // 顯示候選清單
+      function showSongChoices(songName, choices) {
+        document.getElementById("songChoiceTitle").textContent = "請選擇「" + songName + "」的歌譜版本";
+        var list = document.getElementById("songChoiceList");
+        list.innerHTML = "";
+        choices.forEach(function(choice){
+          var li = document.createElement("li");
+          var btn = document.createElement("button");
+          btn.textContent = choice.name;
+          btn.onclick = function(){
+            selectedFileIds.push(choice.id);
+            document.getElementById("songChoiceDialog").style.display = "none";
+            alert("已選擇：" + choice.name);
+            currentIndex++;
+            processNextSong(); // 選完繼續下一首
+          };
+          li.appendChild(btn);
+          list.appendChild(li);
+        });
+        document.getElementById("songChoiceDialog").style.display = "block";
+      }
+
+      // 完成並合成 PDF
+      function finalizePDF() {
+        var date = "2026-03-28";   // 可以改成流程表日期
+        var session = "週六晚堂";   // 可以改成流程表堂次
+        google.script.run.withSuccessHandler(function(res){
+          window.open(res.pdfUrl, "_blank");
+        }).exportSongPDF(selectedFileIds, date, session);
+      }
+    </script>
+  </body>
+</html>

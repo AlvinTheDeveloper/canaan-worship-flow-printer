@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { font-family: Arial, sans-serif; padding: 10px; font-size: 18px; }
+    .controls { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+    select, input { padding: 8px; font-size: 16px; }
+    ul { list-style: none; padding: 0; margin: 8px 0; max-height: 260px; overflow:auto; border: 1px solid #eee; border-radius:4px; }
+    li { padding: 10px; border-bottom: 1px solid #f0f0f0; cursor: pointer; font-size: 18px; }
+    li:hover { background: #f7f7f7; }
+    table { border-collapse: collapse; margin-top: 12px; width: 100%; font-size: 16px; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; vertical-align: top; }
+    td[contenteditable="true"] { background: #fffbe6; min-width: 80px; }
+    .actions { margin-top: 10px; display:flex; gap:8px; flex-wrap:wrap; }
+    button { padding: 8px 10px; font-size: 16px; cursor: pointer; }
+  </style>
+</head>
+<body>
+
+  
+
+<ul id="searchResults"></ul>
+
+  <div class="controls">
+    <input type="date" id="flowDate">
+    <select id="flowSession">
+      <option value="週六晚堂">週六晚堂</option>
+      <option value="週日午堂">週日午堂</option>
+    </select>
+    <input id="leaderName" placeholder="領詩名稱" />
+    <input id="leaderPhone" placeholder="領詩電話" />
+    <select id="searchMode">
+      <option value="name">歌名</option>
+      <option value="lyric">首句歌詞</option>
+    </select>
+    <input id="q" placeholder="輸入歌名或歌詞（支援中間字）" autocomplete="off" />
+  </div>
+
+
+  <h3>敬拜流程</h3>
+  <table id="flowTable">
+    <thead>
+      <tr>
+        <th>編號</th><th>歌名</th><th>調子</th><th>首句</th>
+        <th>音樂處理</th><th>Remarks</th><th>操作</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <div class="actions">
+    <button onclick="exportWord()">輸出 Word</button>
+    <button onclick="exportPDF()">輸出 PDF</button>
+    <button onclick="saveDraftLocal()">儲存進度</button>
+    <button onclick="loadDraftLocal()">載入進度</button>
+    <button onclick="clearFlow()">清空流程</button>
+    <button onclick="exportSongPDF()">輸出合成譜 PDF</button>
+  </div>
+
+  <div id="songChoiceDialog">
+  <h3 id="songChoiceTitle"></h3>
+  <ul id="songChoiceList"></ul>
+</div>
+
+<h2>SongDB 清單</h2>
+<iframe 
+  src="https://docs.google.com/spreadsheets/d/e/2PACX-1vRAUV7G4vfFJEt7J57Ok1MZxBRnaeEt7zhdA-OVFxAq-h_Uhp8YcryFwhDcMkf5YEp_lu1aESsZHCbR/pubhtml?gid=459942170&single=true" 
+  width="100%" 
+  height="600" 
+  frameborder="0">
+</iframe>
+
+
+  <script>
+   
+
+
+
+
+function displayResults(results) {
+  var list = document.getElementById("searchResults");
+  list.innerHTML = "";
+
+  results.forEach(song => {
+    var li = document.createElement("li");
+    li.textContent = song.name;
+    li.onclick = function() {
+      if (song.isNew) {
+        addNewSongRow();
+      } else {
+        flowList.push(song);
+        renderFlowTable();
+      }
+    };
+    list.appendChild(li);
+  });
+}
+
+function addNewSongRow() {
+  flowList.push({
+    code: "新歌",      // 用 code 欄位顯示「新歌」
+    name: "",
+    tone: "",
+    key: "",
+    music: "",
+    remarks: ""
+  });
+
+  renderFlow(); // 即時更新表格
+}
+
+
+function renderFlowTable() {
+  var table = document.getElementById("flowTable");
+  table.innerHTML = "";
+
+  flowList.forEach((song, index) => {
+    var row = table.insertRow();
+    row.insertCell().textContent = song.id;
+
+    ["name","key","firstLine","music","remarks"].forEach(field => {
+      var cell = row.insertCell();
+      var input = document.createElement("input");
+      input.value = song[field];
+      input.oninput = e => flowList[index][field] = e.target.value;
+      cell.appendChild(input);
+    });
+  });
+}
+
+
+
+
+    const input = document.getElementById('q');
+    const list = document.getElementById('searchResults');
+    const flowTableBody = document.querySelector('#flowTable tbody');
+    const searchModeSelect = document.getElementById('searchMode');
+    let flowList = [];
+    let timer = null;
+    let pending = 0;
+    const DEBOUNCE_MS = 300;
+
+    input.addEventListener('input', function() {
+  const q = input.value.trim();
+  const mode = searchModeSelect.value;
+
+  if (timer) clearTimeout(timer);
+  timer = setTimeout(() => {
+    if (!q) {
+      list.innerHTML = '';
+      return;
+    }
+    google.script.run.withSuccessHandler(renderList).searchSongs(q, mode);
+  }, DEBOUNCE_MS);
+});
+
+function renderList(items) {
+  list.innerHTML = '';
+
+  if (!items || items.length === 0) {
+    const li = document.createElement('li');
+    li.textContent = '➕ 新歌';
+    li.style.color = '#007bff';
+    li.onclick = () => addNewSongRow();
+    list.appendChild(li);
+    return;
+  }
+
+  items.forEach(item => {
+    const li = document.createElement('li');
+    li.textContent = item.code + ' - ' + item.name + ' (' + item.tone + ')';
+    li.onclick = () => addToFlow(item);
+    list.appendChild(li);
+  });
+}
+
+
+    function addToFlow(item) {
+      flowList.push(item);
+      renderFlow();
+      input.value = '';
+      list.innerHTML = '';
+    }
+
+    function renderFlow() {
+  flowTableBody.innerHTML = '';
+
+  flowList.forEach((item, index) => {
+    const row = document.createElement('tr');
+
+    row.innerHTML = `
+      <td>${item.code || "新歌"}</td>
+      <td><textarea oninput="flowList[${index}].name=this.value">${item.name || ""}</textarea></td>
+      <td><textarea oninput="flowList[${index}].tone=this.value">${item.tone || ""}</textarea></td>
+      <td><textarea oninput="flowList[${index}].key=this.value">${item.key || ""}</textarea></td>
+      <td><textarea oninput="flowList[${index}].music=this.value">${item.music || ""}</textarea></td>
+      <td><textarea oninput="flowList[${index}].remarks=this.value">${item.remarks || ""}</textarea></td>
+      <td>
+        <button onclick="removeSong(${index})">刪除</button>
+        <button onclick="moveUp(${index})">↑</button>
+        <button onclick="moveDown(${index})">↓</button>
+      </td>
+    `;
+
+    flowTableBody.appendChild(row);
+  });
+}
+
+
+
+    function syncFlowFromTable() {
+  const rows = flowTableBody.querySelectorAll('tr');
+  rows.forEach((row, i) => {
+    flowList[i].music = row.cells[4].querySelector("textarea").value.trim();
+    flowList[i].remarks = row.cells[5].querySelector("textarea").value.trim();
+  });
+}
+
+
+    function removeSong(index) {
+      syncFlowFromTable();
+      flowList.splice(index, 1);
+      renderFlow();
+    }
+
+    function moveUp(index) {
+      syncFlowFromTable();
+      if (index > 0) {
+        [flowList[index-1], flowList[index]] = [flowList[index], flowList[index-1]];
+        renderFlow();
+      }
+    }
+
+    function moveDown(index) {
+      syncFlowFromTable();
+      if (index < flowList.length - 1) {
+        [flowList[index+1], flowList[index]] = [flowList[index], flowList[index+1]];
+        renderFlow();
+      }
+    }
+
+   function exportWord() {
+  syncFlowFromTable();
+
+  const date = document.getElementById('flowDate').value;
+  const session = document.getElementById('flowSession').value;
+  const leaderName = document.getElementById('leaderName').value;
+  const leaderPhone = document.getElementById('leaderPhone').value;
+
+  console.log("送去後端嘅 flowList:", flowList);
+
+  google.script.run.withSuccessHandler(function(res){
+    console.log("後端回傳:", res);
+    if (res && res.wordUrl) {
+      window.open(res.wordUrl, "_blank");
+    } else {
+      alert(res.error || "後端冇回傳 wordUrl");
+    }
+  }).exportWord(flowList, date, session, leaderName, leaderPhone);
+}
+
+
+
+    function exportPDF() {
+      syncFlowFromTable();
+      const date = document.getElementById('flowDate').value;
+      const session = document.getElementById('flowSession').value;
+      const leaderName = document.getElementById('leaderName').value;
+      const leaderPhone = document.getElementById('leaderPhone').value;
+      google.script.run.withSuccessHandler(function(res){
+        if (res && res.pdfUrl) window.open(res.pdfUrl, "_blank");
+      }).exportPDF(flowList, date, session, leaderName, leaderPhone);
+    }
+
+    function saveDraftLocal() {
+      syncFlowFromTable();
+      localStorage.setItem('flowDraft', JSON.stringify(flowList));
+      alert("已儲存進度到瀏覽器");
+    }
+
+    function loadDraftLocal() {
+      const draft = localStorage.getItem('flowDraft');
+      if (draft) {
+        flowList = JSON.parse(draft);
+        renderFlow();
+      } else {
+        alert("沒有儲存的進度");
+      }
+    }
+
+    function clearFlow() {
+      flowList = [];
+      renderFlow();
+      localStorage.removeItem('flowDraft');
+    }
+
+    function exportSongPDF() {
+      syncFlowFromTable();
+      const date = document.getElementById('flowDate').value;
+      const session = document.getElementById('flowSession').value;
+      selectedFileIds = [];
+
+      // ✅ 就係呢度：流程表歌數量
+      pending = flowList.length;
+
+      console.log("開始合成譜流程，流程表歌數:", pending);
+
+      if (pending === 0) {
+        alert("流程表冇歌，無法合成");
+        return;
+      }
+
+      flowList.forEach(item => {
+        console.log("檢查歌:", item.code, item.name);
+
+        google.script.run.withSuccessHandler(function(res){
+          console.log("findSongFiles 回傳:", res);
+
+          if (res.length === 1) {
+            selectedFileIds.push(res[0].id);
+            console.log("自動選擇:", res[0].name);
+            pending--;
+          } else if (res.length > 1) {
+            console.log("多版本，需要人工選擇");
+            showSongChoices(item.name, res);
+          } else {
+            console.log("找不到檔案:", item.code);
+            pending--;
+          }
+
+          if (pending === 0) {
+            console.log("全部歌已處理，準備呼叫 exportSongPDF()");
+            google.script.run.withSuccessHandler(function(res2){
+              console.log("後端回傳:", res2);
+              if (res2 && res2.pdfUrl) {
+                window.open(res2.pdfUrl, "_blank");
+              } else {
+                alert((res2 && res2.error) || "合成失敗，沒有 pdfUrl");
+              }
+            }).exportSongPDF(selectedFileIds, date, session);
+          }
+        }).findSongFiles(item.code);
+      });
+}
+
+
+
+function showSongChoices(songName, choices) {
+  document.getElementById("songChoiceTitle").textContent = "請選擇「" + songName + "」的歌譜版本";
+  var list = document.getElementById("songChoiceList");
+  list.innerHTML = "";
+  choices.forEach(function(choice){
+    var li = document.createElement("li");
+    var btn = document.createElement("button");
+    btn.textContent = choice.name;
+    btn.onclick = function(){
+      selectedFileIds.push(choice.id);
+      document.getElementById("songChoiceDialog").style.display = "none";
+      alert("已選擇：" + choice.name);
+
+      // ✅ 檢查是否所有歌都已揀好
+      pending--;
+      if (pending === 0) {
+        const date = document.getElementById('flowDate').value;
+        const session = document.getElementById('flowSession').value;
+        google.script.run.withSuccessHandler(function(res2){
+          if (res2 && res2.pdfUrl) {
+            window.open(res2.pdfUrl, "_blank");
+          } else {
+            alert(res2 && res2.error ? res2.error : "合成失敗，沒有 pdfUrl");
+          }
+        }).exportSongPDF(selectedFileIds, date, session);
+      }
+    };
+    li.appendChild(btn);
+    list.appendChild(li);
+  });
+  document.getElementById("songChoiceDialog").style.display = "block";
+}
+
+
+
+
+
+
+  </script>
+</body>
+</html>
+
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <script>
+      function testExportWord() {
+        // 假歌單資料
+        const flowList = [
+          { code:"001", name:"歌名A", tone:"C", key:"1", music:"快", remarks:"副歌重複" },
+          { code:"002", name:"歌名B", tone:"D", key:"4", music:"慢", remarks:"特別留意" }
+        ];
+
+        const date = "2026-04-03";
+        const session = "週六晚堂";
+        const leaderName = "小明";
+        const leaderPhone = "91234567";
+
+        console.log("送去後端嘅 flowList:", flowList);
+
+        google.script.run.withSuccessHandler(function(res){
+          console.log("後端回傳:", res);
+          if (res && res.wordUrl) {
+            window.open(res.wordUrl, "_blank"); // 彈出下載
+          } else {
+            alert("後端冇回傳 wordUrl");
+          }
+        }).exportWord(flowList, date, session, leaderName, leaderPhone);
+      }
+    </script>
+  </head>
+  <body>
+  </body>
+</html>
+
