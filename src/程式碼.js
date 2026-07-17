@@ -167,14 +167,17 @@ async function exportFullPDF(
 }
 
 function findSongFiles(code) {
-  if (!code) {
-    throw new Error("必須傳入編號，例如 '02-021'");
+  code = String(code || "").trim();
+  // Return empty instead of throwing so the UI can report "找不到檔案".
+  if (!code || code === "新歌") {
+    return [];
   }
+
   var rootFolder = DriveApp.getFolderById(CHART_ROOT_FOLDER_ID_);
   var results = [];
 
   // 從編號前綴判斷子資料夾，例如 "02-021" → "02字"
-  var prefix = String(code).split("-")[0];
+  var prefix = code.split("-")[0];
   var subFolderName = prefix + "字";
 
   var subFolders = rootFolder.getFoldersByName(subFolderName);
@@ -183,7 +186,7 @@ function findSongFiles(code) {
     var files = subFolder.getFiles();
     while (files.hasNext()) {
       var file = files.next();
-      if (file.getName().indexOf(String(code)) === 0) {
+      if (file.getName().indexOf(code) === 0) {
         results.push({ id: file.getId(), name: file.getName() });
       }
     }
@@ -200,19 +203,26 @@ function testFindSongFiles() {
  * Merge selected chart PDFs into one file using pdf-lib.
  */
 async function exportSongPDF(selectedFileIds, dateStr, sessionStr) {
-  if (!selectedFileIds || !selectedFileIds.length) {
-    return { pdfUrl: null, error: "冇揀到歌譜檔案，無法合成" };
+  try {
+    if (!selectedFileIds || !selectedFileIds.length) {
+      return { pdfUrl: null, error: "冇揀到歌譜檔案，無法合成" };
+    }
+
+    var title = String(dateStr || "") + String(sessionStr || "") + "敬拜合成譜";
+    var blobs = selectedFileIds.map(function (id) {
+      return DriveApp.getFileById(id).getBlob();
+    });
+
+    var mergedBlob = await mergePdfBlobs_(blobs, title + ".pdf");
+    var rootFolder = DriveApp.getFolderById(CHART_ROOT_FOLDER_ID_);
+    var newFile = rootFolder.createFile(mergedBlob);
+    return { pdfUrl: newFile.getUrl(), fileId: newFile.getId() };
+  } catch (err) {
+    return {
+      pdfUrl: null,
+      error: "輸出合成譜失敗：\n" + (err && err.message ? err.message : String(err)),
+    };
   }
-
-  var title = String(dateStr || "") + String(sessionStr || "") + "敬拜合成譜";
-  var blobs = selectedFileIds.map(function (id) {
-    return DriveApp.getFileById(id).getBlob();
-  });
-
-  var mergedBlob = await mergePdfBlobs_(blobs, title + ".pdf");
-  var rootFolder = DriveApp.getFolderById(CHART_ROOT_FOLDER_ID_);
-  var newFile = rootFolder.createFile(mergedBlob);
-  return { pdfUrl: newFile.getUrl(), fileId: newFile.getId() };
 }
 
 /** Load pdf-lib once per execution via CDN + eval (Apps Script has no npm). */
