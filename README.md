@@ -13,6 +13,12 @@ Yes — this project is **container-bound** to a Google Sheet:
 
 The Sheet is the data source; the Apps Script web app is the UI.
 
+## Features
+
+- Search songs / build worship flow
+- Export Word / PDF flow sheet (copies Doc template before editing)
+- **合成譜 PDF**: merge selected chart PDFs with **pdf-lib**
+
 ## Develop with clasp
 
 ```bash
