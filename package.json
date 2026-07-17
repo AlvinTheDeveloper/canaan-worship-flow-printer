@@ -1,0 +1,26 @@
+{
+  "name": "canaan-worship-flow-printer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Google Apps Script project for Canaan worship flow printing",
+  "scripts": {
+    "clasp": "clasp",
+    "login": "clasp login",
+    "status": "clasp show-file-status",
+    "push": "clasp push",
+    "pull": "clasp pull",
+    "open": "clasp open-script",
+    "deploy": "clasp create-deployment",
+    "deployments": "clasp list-deployments",
+    "auth-status": "clasp show-authorized-user",
+    "typecheck": "tsc -p jsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@google/clasp": "^3.3.0",
+    "@types/google-apps-script": "^1.0.99",
+    "typescript": "^5.8.3"
+  }
+}

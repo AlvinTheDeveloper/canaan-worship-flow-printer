@@ -1,0 +1,8 @@
+{
+  "name": "canaan-worship-flow-printer",
+  "install": "bash scripts/cloud-install.sh",
+  "repositoryDependencies": [
+    "github.com/AlvinTheDeveloper/teamcity-ci-cd-settings"
+  ],
+  "agentCanUpdateSnapshot": true
+}
