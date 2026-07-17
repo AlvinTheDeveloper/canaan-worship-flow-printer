@@ -296,123 +296,58 @@ function renderList(items) {
       localStorage.removeItem('flowDraft');
     }
 
-    var chartLookupIssues = [];
-
-    function songLabel_(item) {
-      return (item.code || "新歌") + " " + (item.name || "");
-    }
-
-    function finishChartLookup_() {
-      const date = document.getElementById('flowDate').value;
-      const session = document.getElementById('flowSession').value;
-
-      if (!selectedFileIds.length) {
-        var msg = "輸出合成譜失敗：搵唔到任何歌譜 PDF。\n\n";
-        if (chartLookupIssues.length) {
-          msg += chartLookupIssues.join("\n");
-        } else {
-          msg += "請確認歌曲有正確編號，以及樂譜庫有對應檔案。";
-        }
-        alert(msg);
-        return;
-      }
-
-      if (chartLookupIssues.length) {
-        var proceed = confirm(
-          "以下歌曲未揀到歌譜，會被略過：\n\n" +
-          chartLookupIssues.join("\n") +
-          "\n\n已揀到 " + selectedFileIds.length + " 個檔案。是否繼續合成？"
-        );
-        if (!proceed) return;
-      }
-
-      google.script.run
-        .withSuccessHandler(function(res2){
-          console.log("後端回傳:", res2);
-          if (res2 && res2.pdfUrl) {
-            window.open(res2.pdfUrl, "_blank");
-          } else {
-            alert((res2 && res2.error) || "合成失敗：後端冇回傳 pdfUrl");
-          }
-        })
-        .withFailureHandler(function(err){
-          alert("合成譜伺服器錯誤：\n" + (err && err.message ? err.message : err));
-        })
-        .exportSongPDF(selectedFileIds, date, session);
-    }
-
     function exportSongPDF() {
       syncFlowFromTable();
+      const date = document.getElementById('flowDate').value;
+      const session = document.getElementById('flowSession').value;
       selectedFileIds = [];
-      chartLookupIssues = [];
+
+      // ✅ 就係呢度：流程表歌數量
       pending = flowList.length;
 
       console.log("開始合成譜流程，流程表歌數:", pending);
 
       if (pending === 0) {
-        alert("輸出合成譜失敗：流程表冇歌。");
+        alert("流程表冇歌，無法合成");
         return;
       }
 
-      var missingCode = flowList.filter(function(item) {
-        var code = String(item.code || "").trim();
-        return !code || code === "新歌";
-      });
-      if (missingCode.length === flowList.length) {
-        alert(
-          "輸出合成譜失敗：流程表全部都係「新歌」或冇編號。\n" +
-          "合成譜需要歌曲編號（例如 02-021）先可以喺樂譜庫搵 PDF。"
-        );
-        return;
-      }
-
-      flowList.forEach(function(item) {
+      flowList.forEach(item => {
         console.log("檢查歌:", item.code, item.name);
-        var label = songLabel_(item);
-        var code = String(item.code || "").trim();
 
-        if (!code || code === "新歌") {
-          chartLookupIssues.push("• " + label + "：冇編號（新歌無法自動搵譜）");
-          pending--;
-          if (pending === 0) finishChartLookup_();
-          return;
-        }
+        google.script.run.withSuccessHandler(function(res){
+          console.log("findSongFiles 回傳:", res);
 
-        google.script.run
-          .withSuccessHandler(function(res){
-            console.log("findSongFiles 回傳:", res);
-            res = res || [];
-
-            if (res.length === 1) {
-              selectedFileIds.push(res[0].id);
-              console.log("自動選擇:", res[0].name);
-              pending--;
-              if (pending === 0) finishChartLookup_();
-            } else if (res.length > 1) {
-              console.log("多版本，需要人工選擇");
-              showSongChoices(item, res);
-            } else {
-              chartLookupIssues.push(
-                "• " + label + "：樂譜庫搵唔到檔案（資料夾 " +
-                code.split("-")[0] + "字，檔名以 " + code + " 開頭）"
-              );
-              pending--;
-              if (pending === 0) finishChartLookup_();
-            }
-          })
-          .withFailureHandler(function(err){
-            chartLookupIssues.push(
-              "• " + label + "：搜尋失敗 — " + (err && err.message ? err.message : err)
-            );
+          if (res.length === 1) {
+            selectedFileIds.push(res[0].id);
+            console.log("自動選擇:", res[0].name);
             pending--;
-            if (pending === 0) finishChartLookup_();
-          })
-          .findSongFiles(item.code);
-      });
-    }
+          } else if (res.length > 1) {
+            console.log("多版本，需要人工選擇");
+            showSongChoices(item.name, res);
+          } else {
+            console.log("找不到檔案:", item.code);
+            pending--;
+          }
 
-function showSongChoices(item, choices) {
-  var songName = item.name || item.code || "歌曲";
+          if (pending === 0) {
+            console.log("全部歌已處理，準備呼叫 exportSongPDF()");
+            google.script.run.withSuccessHandler(function(res2){
+              console.log("後端回傳:", res2);
+              if (res2 && res2.pdfUrl) {
+                window.open(res2.pdfUrl, "_blank");
+              } else {
+                alert((res2 && res2.error) || "合成失敗，沒有 pdfUrl");
+              }
+            }).exportSongPDF(selectedFileIds, date, session);
+          }
+        }).findSongFiles(item.code);
+      });
+}
+
+
+
+function showSongChoices(songName, choices) {
   document.getElementById("songChoiceTitle").textContent = "請選擇「" + songName + "」的歌譜版本";
   var list = document.getElementById("songChoiceList");
   list.innerHTML = "";
@@ -423,30 +358,25 @@ function showSongChoices(item, choices) {
     btn.onclick = function(){
       selectedFileIds.push(choice.id);
       document.getElementById("songChoiceDialog").style.display = "none";
+      alert("已選擇：" + choice.name);
 
+      // ✅ 檢查是否所有歌都已揀好
       pending--;
       if (pending === 0) {
-        finishChartLookup_();
-      } else {
-        alert("已選擇：" + choice.name + "\n仲有 " + pending + " 首歌等待處理。");
+        const date = document.getElementById('flowDate').value;
+        const session = document.getElementById('flowSession').value;
+        google.script.run.withSuccessHandler(function(res2){
+          if (res2 && res2.pdfUrl) {
+            window.open(res2.pdfUrl, "_blank");
+          } else {
+            alert((res2 && res2.error) || "合成失敗，沒有 pdfUrl");
+          }
+        }).exportSongPDF(selectedFileIds, date, session);
       }
     };
     li.appendChild(btn);
     list.appendChild(li);
   });
-
-  var skipLi = document.createElement("li");
-  var skipBtn = document.createElement("button");
-  skipBtn.textContent = "略過呢首歌";
-  skipBtn.onclick = function(){
-    chartLookupIssues.push("• " + songLabel_(item) + "：多版本時選擇略過");
-    document.getElementById("songChoiceDialog").style.display = "none";
-    pending--;
-    if (pending === 0) finishChartLookup_();
-  };
-  skipLi.appendChild(skipBtn);
-  list.appendChild(skipLi);
-
   document.getElementById("songChoiceDialog").style.display = "block";
 }
 

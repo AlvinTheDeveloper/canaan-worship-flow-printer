@@ -166,43 +166,29 @@ async function exportFullPDF(
   return { pdfUrl: newFile.getUrl(), fileId: newFile.getId() };
 }
 
-/**
- * Find chart PDFs for a song code under 樂譜庫/<prefix>字/.
- * Returns [] for missing/invalid codes (does not throw).
- */
 function findSongFiles(code) {
-  code = String(code || "").trim();
-  if (!code || code === "新歌") {
-    return [];
+  if (!code) {
+    throw new Error("必須傳入編號，例如 '02-021'");
   }
+  var rootFolder = DriveApp.getFolderById(CHART_ROOT_FOLDER_ID_);
+  var results = [];
 
-  try {
-    var rootFolder = DriveApp.getFolderById(CHART_ROOT_FOLDER_ID_);
-    var results = [];
+  // 從編號前綴判斷子資料夾，例如 "02-021" → "02字"
+  var prefix = String(code).split("-")[0];
+  var subFolderName = prefix + "字";
 
-    // 從編號前綴判斷子資料夾，例如 "02-021" → "02字"
-    var prefix = code.split("-")[0];
-    var subFolderName = prefix + "字";
-
-    var subFolders = rootFolder.getFoldersByName(subFolderName);
-    if (!subFolders.hasNext()) {
-      return [];
-    }
-
+  var subFolders = rootFolder.getFoldersByName(subFolderName);
+  if (subFolders.hasNext()) {
     var subFolder = subFolders.next();
     var files = subFolder.getFiles();
     while (files.hasNext()) {
       var file = files.next();
-      if (file.getName().indexOf(code) === 0) {
+      if (file.getName().indexOf(String(code)) === 0) {
         results.push({ id: file.getId(), name: file.getName() });
       }
     }
-    return results;
-  } catch (err) {
-    throw new Error(
-      "搜尋歌譜失敗（編號 " + code + "）：" + (err && err.message ? err.message : err)
-    );
   }
+  return results;
 }
 
 function testFindSongFiles() {
@@ -214,70 +200,28 @@ function testFindSongFiles() {
  * Merge selected chart PDFs into one file using pdf-lib.
  */
 async function exportSongPDF(selectedFileIds, dateStr, sessionStr) {
-  try {
-    if (!selectedFileIds || !selectedFileIds.length) {
-      return {
-        pdfUrl: null,
-        error: "冇揀到任何歌譜 PDF，無法合成。請確認流程表歌曲有編號，且樂譜庫內有對應檔案。",
-      };
-    }
-
-    var title = String(dateStr || "") + String(sessionStr || "") + "敬拜合成譜";
-    var blobs = [];
-    for (var i = 0; i < selectedFileIds.length; i++) {
-      try {
-        var file = DriveApp.getFileById(selectedFileIds[i]);
-        var blob = file.getBlob();
-        var mime = String(blob.getContentType() || "");
-        var name = file.getName();
-        if (mime.indexOf("pdf") === -1 && !/\.pdf$/i.test(name)) {
-          return {
-            pdfUrl: null,
-            error: "檔案唔係 PDF，無法合併：\n" + name + "（" + mime + "）",
-          };
-        }
-        blobs.push(blob);
-      } catch (fileErr) {
-        return {
-          pdfUrl: null,
-          error:
-            "讀取歌譜檔案失敗（id: " +
-            selectedFileIds[i] +
-            "）：\n" +
-            (fileErr && fileErr.message ? fileErr.message : fileErr),
-        };
-      }
-    }
-
-    var mergedBlob = await mergePdfBlobs_(blobs, title + ".pdf");
-    var rootFolder = DriveApp.getFolderById(CHART_ROOT_FOLDER_ID_);
-    var newFile = rootFolder.createFile(mergedBlob);
-    return { pdfUrl: newFile.getUrl(), fileId: newFile.getId() };
-  } catch (err) {
-    return {
-      pdfUrl: null,
-      error: "合成譜失敗：\n" + (err && err.message ? err.message : String(err)),
-    };
+  if (!selectedFileIds || !selectedFileIds.length) {
+    return { pdfUrl: null, error: "冇揀到歌譜檔案，無法合成" };
   }
+
+  var title = String(dateStr || "") + String(sessionStr || "") + "敬拜合成譜";
+  var blobs = selectedFileIds.map(function (id) {
+    return DriveApp.getFileById(id).getBlob();
+  });
+
+  var mergedBlob = await mergePdfBlobs_(blobs, title + ".pdf");
+  var rootFolder = DriveApp.getFolderById(CHART_ROOT_FOLDER_ID_);
+  var newFile = rootFolder.createFile(mergedBlob);
+  return { pdfUrl: newFile.getUrl(), fileId: newFile.getId() };
 }
 
 /** Load pdf-lib once per execution via CDN + eval (Apps Script has no npm). */
 function ensurePdfLib_() {
   if (typeof PDFLib !== "undefined") return;
-  try {
-    var js = UrlFetchApp.fetch(PDF_LIB_CDN_)
-      .getContentText()
-      .replace(/setTimeout\(.*?,.*?(\d*?)\)/g, "Utilities.sleep($1);return t();");
-    eval(js);
-  } catch (err) {
-    throw new Error(
-      "無法下載/載入 pdf-lib（需要允許連線 cdn.jsdelivr.net）：\n" +
-        (err && err.message ? err.message : err)
-    );
-  }
-  if (typeof PDFLib === "undefined") {
-    throw new Error("pdf-lib 載入後仍然唔存在（PDFLib undefined）");
-  }
+  var js = UrlFetchApp.fetch(PDF_LIB_CDN_)
+    .getContentText()
+    .replace(/setTimeout\(.*?,.*?(\d*?)\)/g, "Utilities.sleep($1);return t();");
+  eval(js);
 }
 
 /**
@@ -288,23 +232,12 @@ async function mergePdfBlobs_(blobs, outputName) {
   var pdfDoc = await PDFLib.PDFDocument.create();
 
   for (var i = 0; i < blobs.length; i++) {
-    try {
-      var bytes = new Uint8Array(blobs[i].getBytes());
-      var src = await PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true });
-      var pageIndices = src.getPageIndices();
-      var pages = await pdfDoc.copyPages(src, pageIndices);
-      for (var p = 0; p < pages.length; p++) {
-        pdfDoc.addPage(pages[p]);
-      }
-    } catch (err) {
-      throw new Error(
-        "合併第 " +
-          (i + 1) +
-          " 個 PDF 失敗（" +
-          (blobs[i].getName() || "未命名") +
-          "）：\n" +
-          (err && err.message ? err.message : err)
-      );
+    var bytes = new Uint8Array(blobs[i].getBytes());
+    var src = await PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true });
+    var pageIndices = src.getPageIndices();
+    var pages = await pdfDoc.copyPages(src, pageIndices);
+    for (var p = 0; p < pages.length; p++) {
+      pdfDoc.addPage(pages[p]);
     }
   }
 
