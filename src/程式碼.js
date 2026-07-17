@@ -164,9 +164,12 @@ async function exportFullPDF(
     }
 
     var mergedBlob = await mergePdfBlobs_(blobs, title + ".pdf");
-    var outFolder = DriveApp.getFolderById(CHART_ROOT_FOLDER_ID_);
-    var newFile = outFolder.createFile(mergedBlob);
-    return { pdfUrl: newFile.getUrl(), fileId: newFile.getId() };
+    var newFile = DriveApp.createFile(mergedBlob);
+    newFile.setName(title + ".pdf");
+    return {
+      pdfUrl: "https://drive.google.com/uc?export=download&id=" + newFile.getId(),
+      fileId: newFile.getId(),
+    };
   } catch (err) {
     return {
       pdfUrl: null,
