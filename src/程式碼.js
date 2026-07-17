@@ -131,8 +131,7 @@ function buildFlowDocument_(flowList, dateStr, sessionStr, leaderName, leaderPho
 }
 
 /**
- * Merge flow-sheet PDF + chart PDFs with pdf-lib.
- * flowList is optional; when provided, a fresh flow PDF is prepended.
+ * Merge 流程 PDF first, then chart 譜 PDFs, with pdf-lib.
  */
 async function exportFullPDF(
   selectedFileIds,
@@ -142,28 +141,38 @@ async function exportFullPDF(
   leaderPhone,
   flowList
 ) {
-  if (!selectedFileIds || !selectedFileIds.length) {
-    return { pdfUrl: null, error: "冇揀到歌譜檔案" };
-  }
+  try {
+    if (!flowList || !flowList.length) {
+      return { pdfUrl: null, error: "流程表冇歌，無法輸出合成譜" };
+    }
+    if (!selectedFileIds || !selectedFileIds.length) {
+      return { pdfUrl: null, error: "冇揀到歌譜檔案，無法輸出合成譜" };
+    }
 
-  var blobs = [];
-  var title =
-    String(date || "") + " " + String(session || "") + " 敬拜流程合成譜";
+    var title =
+      String(date || "") + " " + String(session || "") + " 敬拜流程合成譜";
+    var blobs = [];
 
-  if (flowList && flowList.length) {
+    // 1) 流程 first
     var flowPdf = exportPDF(flowList, date, session, leaderName, leaderPhone);
     if (flowPdf.error) return { pdfUrl: null, error: flowPdf.error };
     blobs.push(DriveApp.getFileById(flowPdf.fileId).getBlob());
-  }
 
-  for (var i = 0; i < selectedFileIds.length; i++) {
-    blobs.push(DriveApp.getFileById(selectedFileIds[i]).getBlob());
-  }
+    // 2) then 譜
+    for (var i = 0; i < selectedFileIds.length; i++) {
+      blobs.push(DriveApp.getFileById(selectedFileIds[i]).getBlob());
+    }
 
-  var mergedBlob = await mergePdfBlobs_(blobs, title + ".pdf");
-  var outFolder = DriveApp.getFolderById(CHART_ROOT_FOLDER_ID_);
-  var newFile = outFolder.createFile(mergedBlob);
-  return { pdfUrl: newFile.getUrl(), fileId: newFile.getId() };
+    var mergedBlob = await mergePdfBlobs_(blobs, title + ".pdf");
+    var outFolder = DriveApp.getFolderById(CHART_ROOT_FOLDER_ID_);
+    var newFile = outFolder.createFile(mergedBlob);
+    return { pdfUrl: newFile.getUrl(), fileId: newFile.getId() };
+  } catch (err) {
+    return {
+      pdfUrl: null,
+      error: "輸出合成譜失敗：\n" + (err && err.message ? err.message : String(err)),
+    };
+  }
 }
 
 function findSongFiles(code) {

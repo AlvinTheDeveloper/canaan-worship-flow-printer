@@ -298,9 +298,11 @@ function renderList(items) {
 
     var missingChartSongs = [];
 
-    function runExportSongPDF_() {
+    function runExportFullPDF_() {
       const date = document.getElementById('flowDate').value;
       const session = document.getElementById('flowSession').value;
+      const leaderName = document.getElementById('leaderName').value;
+      const leaderPhone = document.getElementById('leaderPhone').value;
 
       if (!selectedFileIds.length) {
         var detail = missingChartSongs.length
@@ -322,7 +324,7 @@ function renderList(items) {
         .withFailureHandler(function(err){
           alert("輸出合成譜失敗：\n" + (err && err.message ? err.message : err));
         })
-        .exportSongPDF(selectedFileIds, date, session);
+        .exportFullPDF(selectedFileIds, date, session, leaderName, leaderPhone, flowList);
     }
 
     function exportSongPDF() {
@@ -363,8 +365,8 @@ function renderList(items) {
             }
 
             if (pending === 0) {
-              console.log("全部歌已處理，準備呼叫 exportSongPDF()");
-              runExportSongPDF_();
+              console.log("全部歌已處理，準備呼叫 exportFullPDF()");
+              runExportFullPDF_();
             }
           })
           .withFailureHandler(function(err){
@@ -373,7 +375,7 @@ function renderList(items) {
               "（" + (err && err.message ? err.message : err) + "）"
             );
             pending--;
-            if (pending === 0) runExportSongPDF_();
+            if (pending === 0) runExportFullPDF_();
           })
           .findSongFiles(item.code);
       });
@@ -395,7 +397,7 @@ function showSongChoices(songName, choices) {
       // ✅ 檢查是否所有歌都已揀好
       pending--;
       if (pending === 0) {
-        runExportSongPDF_();
+        runExportFullPDF_();
       }
     };
     li.appendChild(btn);
