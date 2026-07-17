@@ -56,7 +56,7 @@
     <button onclick="saveDraftLocal()">儲存進度</button>
     <button onclick="loadDraftLocal()">載入進度</button>
     <button onclick="clearFlow()">清空流程</button>
-    <button onclick="exportSongPDF()">輸出合成譜 PDF</button>
+    <button onclick="exportSongPDF()">輸出合成譜 PDF（待完成）</button>
   </div>
 
   <div id="songChoiceDialog">
@@ -337,7 +337,7 @@ function renderList(items) {
               if (res2 && res2.pdfUrl) {
                 window.open(res2.pdfUrl, "_blank");
               } else {
-                alert((res2 && res2.error) || "合成失敗，沒有 pdfUrl");
+                alert("合成失敗，沒有 pdfUrl");
               }
             }).exportSongPDF(selectedFileIds, date, session);
           }
@@ -361,17 +361,17 @@ function showSongChoices(songName, choices) {
       alert("已選擇：" + choice.name);
 
       // ✅ 檢查是否所有歌都已揀好
-      pending--;
-      if (pending === 0) {
+      if (selectedFileIds.length === flowList.length) {
         const date = document.getElementById('flowDate').value;
         const session = document.getElementById('flowSession').value;
         google.script.run.withSuccessHandler(function(res2){
-          if (res2 && res2.pdfUrl) {
-            window.open(res2.pdfUrl, "_blank");
-          } else {
-            alert(res2 && res2.error ? res2.error : "合成失敗，沒有 pdfUrl");
-          }
-        }).exportSongPDF(selectedFileIds, date, session);
+  if (res2 && res2.pdfUrl) {
+    window.open(res2.pdfUrl, "_blank");
+  } else {
+    alert("合成失敗，沒有 pdfUrl");
+  }
+}).exportFullPDF(selectedFileIds, date, session, leaderName, leaderPhone);
+
       }
     };
     li.appendChild(btn);

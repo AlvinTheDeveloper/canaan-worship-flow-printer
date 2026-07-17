@@ -1,8 +1,8 @@
 function doGet() {
-  return HtmlService.createHtmlOutputFromFile("Index");
+  return HtmlService.createHtmlOutputFromFile('Index');
 }
 
-// 搜尋歌名或首句歌詞（資料來自 bound Google Sheet 的 SongDB）
+// 搜尋歌名或首句歌詞
 function searchSongs(query, mode) {
   query = String(query || "").trim().toLowerCase();
   if (!query) return [];
@@ -14,15 +14,13 @@ function searchSongs(query, mode) {
   for (var i = 1; i < data.length; i++) {
     var name = String(data[i][1] || "").trim().toLowerCase();
     var firstLine = String(data[i][4] || "").trim().toLowerCase();
-    if (
-      (mode === "name" && name.indexOf(query) >= 0) ||
-      (mode === "lyric" && firstLine.indexOf(query) >= 0)
-    ) {
+    if ((mode === "name" && name.indexOf(query) >= 0) ||
+        (mode === "lyric" && firstLine.indexOf(query) >= 0)) {
       matches.push({
         code: data[i][0],
         name: data[i][1],
         tone: data[i][3],
-        key: data[i][4],
+        key: data[i][4]
       });
       if (matches.length >= 100) break;
     }
@@ -30,52 +28,42 @@ function searchSongs(query, mode) {
   return matches;
 }
 
-var FLOW_TEMPLATE_ID_ = "1G-K5OSWBMdYb6WI1Xjn0lO85yCVgfpnvAjXkA_g2iAI";
-var CHART_ROOT_FOLDER_ID_ = "1nqixSJbc_leRJug74JLPt5xZ1i4PBzWN";
-var PDF_LIB_CDN_ =
-  "https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js";
+function onExportClick() {
+  // 假設 songs 已經由前端表單收集好
+  const flowList = songs.map(song => ({
+    code: song.code,
+    name: song.name,
+    tone: song.tone,
+    key: song.key,
+    music: song.music,
+    remarks: song.remarks
+  }));
+
+  const date = document.getElementById("dateInput").value;
+  const session = document.getElementById("sessionInput").value;
+  const leaderName = document.getElementById("leaderNameInput").value;
+  const leaderPhone = document.getElementById("leaderPhoneInput").value;
+
+  console.log("送去後端嘅 flowList:", flowList);
+
+  google.script.run.withSuccessHandler(function(res){
+    if (res && res.wordUrl) {
+      window.open(res.wordUrl, "_blank");
+    }
+  }).exportWord(flowList, date, session, leaderName, leaderPhone);
+}
+
 
 function exportWord(flowList, dateStr, sessionStr, leaderName, leaderPhone) {
-  var built = buildFlowDocument_(flowList, dateStr, sessionStr, leaderName, leaderPhone);
-  if (built.error) return { wordUrl: null, error: built.error };
-  return {
-    wordUrl:
-      "https://docs.google.com/document/d/" +
-      built.fileId +
-      "/export?format=docx",
-    fileId: built.fileId,
-  };
-}
-
-function exportPDF(flowList, dateStr, sessionStr, leaderName, leaderPhone) {
-  var built = buildFlowDocument_(flowList, dateStr, sessionStr, leaderName, leaderPhone);
-  if (built.error) return { pdfUrl: null, error: built.error };
-
-  var docFile = DriveApp.getFileById(built.fileId);
-  var pdfBlob = docFile.getAs(MimeType.PDF);
-  pdfBlob.setName(built.titleText + ".pdf");
-  var pdfFile = DriveApp.createFile(pdfBlob);
-
-  return {
-    pdfUrl: "https://drive.google.com/uc?export=download&id=" + pdfFile.getId(),
-    fileId: pdfFile.getId(),
-  };
-}
-
-/**
- * Copy the Google Doc template first, then fill it (never mutate the template).
- */
-function buildFlowDocument_(flowList, dateStr, sessionStr, leaderName, leaderPhone) {
   if (!flowList || !Array.isArray(flowList) || flowList.length === 0) {
-    return { error: "流程表冇歌，無法輸出" };
+    return { wordUrl: null, error: "流程表冇歌，無法輸出 Word" };
   }
 
-  var titleText = String(dateStr || "") + String(sessionStr || "") + "敬拜流程";
-  var templateFile = DriveApp.getFileById(FLOW_TEMPLATE_ID_);
-  var copyFile = templateFile.makeCopy(titleText);
-  var doc = DocumentApp.openById(copyFile.getId());
+  var templateFile = DriveApp.getFileById("1G-K5OSWBMdYb6WI1Xjn0lO85yCVgfpnvAjXkA_g2iAI");
+  var doc = DocumentApp.openById(templateFile.getId());
   var body = doc.getBody();
 
+  var titleText = dateStr + sessionStr + "敬拜流程";
   var paragraphs = body.getParagraphs();
   if (paragraphs.length > 0) {
     paragraphs[0].setText(titleText);
@@ -91,31 +79,31 @@ function buildFlowDocument_(flowList, dateStr, sessionStr, leaderName, leaderPho
     }
   }
 
-  body.insertParagraph(
-    1,
-    "領詩：" + (leaderName || "") + "（電話：" + (leaderPhone || "") + "）"
-  );
-  body.insertParagraph(2, "日期：" + (dateStr || "") + " " + (sessionStr || ""));
+  body.insertParagraph(1, "領詩：" + leaderName + "（電話：" + leaderPhone + "）");
+  body.insertParagraph(2, "日期：" + dateStr + " " + sessionStr);
 
   var tables = body.getTables();
-  if (!tables || tables.length === 0) {
-    doc.saveAndClose();
-    copyFile.setTrashed(true);
-    return { error: "⚠️ 模板冇表格，歌曲冇更新" };
-  }
-
+if (tables && tables.length > 0) {
   var table = tables[0];
+
+  // ⚠️ 先刪除舊歌行（保留前 3 行 header）
   while (table.getNumRows() > 1) {
     table.removeRow(1);
   }
 
-  for (var r = 0; r < flowList.length; r++) {
-    var song = flowList[r];
+  // 再插入新歌
+  for (var i = 0; i < flowList.length; i++) {
+    var song = flowList[i];
     var newRow = table.appendTableRow();
-    var bgColor = r % 2 === 0 ? "#FFFFFF" : "#FFFFBB";
 
+// 判斷奇偶行：偶數行灰色，奇數行白色
+  var bgColor = (i % 2 === 0) ? "#FFFFFF" : "#FFFFBB";  // 白色 / 淺灰色
+
+
+    // 確保每行有 6 個 cell
     for (var c = 0; c < 6; c++) {
-      newRow.appendTableCell("").setBackgroundColor(bgColor);
+     var cell = newRow.appendTableCell("");
+        cell.setBackgroundColor(bgColor);   // 設定底色
     }
 
     newRow.getCell(0).setText(song.code || "");
@@ -125,56 +113,130 @@ function buildFlowDocument_(flowList, dateStr, sessionStr, leaderName, leaderPho
     newRow.getCell(4).setText(song.music || "");
     newRow.getCell(5).setText(song.remarks || "");
   }
+} else {
+  return { wordUrl: null, error: "⚠️ 模板冇表格，歌曲冇更新" };
+}
 
   doc.saveAndClose();
-  return { fileId: copyFile.getId(), titleText: titleText };
+  var newFile = templateFile.makeCopy(titleText);
+  return { wordUrl: "https://docs.google.com/document/d/" + newFile.getId() + "/export?format=docx" };
 }
 
-/**
- * Merge chart PDFs (+ optional flow PDF) with pdf-lib.
- * selectedFileIds: Drive file IDs of chart PDFs in order.
- */
-async function exportFullPDF(
-  selectedFileIds,
-  date,
-  session,
-  leaderName,
-  leaderPhone,
-  flowList
-) {
-  if (!selectedFileIds || !selectedFileIds.length) {
-    return { pdfUrl: null, error: "冇揀到歌譜檔案" };
+
+
+function exportPDF(flowList, dateStr, sessionStr, leaderName, leaderPhone) {
+  if (!flowList || !Array.isArray(flowList) || flowList.length === 0) {
+    return { wordUrl: null, error: "流程表冇歌，無法輸出 PDF" };
   }
 
-  var blobs = [];
-  var title =
-    String(date || "") + " " + String(session || "") + " 敬拜流程合成譜";
+  var templateFile = DriveApp.getFileById("1G-K5OSWBMdYb6WI1Xjn0lO85yCVgfpnvAjXkA_g2iAI");
+  var doc = DocumentApp.openById(templateFile.getId());
+  var body = doc.getBody();
 
-  if (flowList && flowList.length) {
-    var flowPdf = exportPDF(flowList, date, session, leaderName, leaderPhone);
-    if (flowPdf.error) return { pdfUrl: null, error: flowPdf.error };
-    blobs.push(DriveApp.getFileById(flowPdf.fileId).getBlob());
+  var titleText = dateStr + sessionStr + "敬拜流程";
+  var paragraphs = body.getParagraphs();
+  if (paragraphs.length > 0) {
+    paragraphs[0].setText(titleText);
+    paragraphs[0].setHeading(DocumentApp.ParagraphHeading.TITLE);
+  } else {
+    body.insertParagraph(0, titleText).setHeading(DocumentApp.ParagraphHeading.TITLE);
   }
 
-  for (var i = 0; i < selectedFileIds.length; i++) {
-    blobs.push(DriveApp.getFileById(selectedFileIds[i]).getBlob());
+  for (var i = paragraphs.length - 1; i >= 0; i--) {
+    var text = paragraphs[i].getText();
+    if (text.indexOf("領詩：") !== -1 || text.indexOf("日期：") !== -1) {
+      body.removeChild(paragraphs[i]);
+    }
   }
 
-  var mergedBlob = await mergePdfBlobs_(blobs, title + ".pdf");
-  var outFolder = DriveApp.getFolderById(CHART_ROOT_FOLDER_ID_);
-  var newFile = outFolder.createFile(mergedBlob);
-  return { pdfUrl: newFile.getUrl(), fileId: newFile.getId() };
+  body.insertParagraph(1, "領詩：" + leaderName + "（電話：" + leaderPhone + "）");
+  body.insertParagraph(2, "日期：" + dateStr + " " + sessionStr);
+
+  var tables = body.getTables();
+if (tables && tables.length > 0) {
+  var table = tables[0];
+
+  // ⚠️ 先刪除舊歌行（保留前 3 行 header）
+  while (table.getNumRows() > 1) {
+    table.removeRow(1);
+  }
+
+  // 再插入新歌
+  for (var i = 0; i < flowList.length; i++) {
+    var song = flowList[i];
+    var newRow = table.appendTableRow();
+
+// 判斷奇偶行：偶數行灰色，奇數行白色
+  var bgColor = (i % 2 === 0) ? "#FFFFFF" : "#FFFFBB";  // 白色 / 淺灰色
+
+
+    // 確保每行有 6 個 cell
+    for (var c = 0; c < 6; c++) {
+     var cell = newRow.appendTableCell("");
+        cell.setBackgroundColor(bgColor);   // 設定底色
+    }
+
+    newRow.getCell(0).setText(song.code || "");
+    newRow.getCell(1).setText(song.name || "");
+    newRow.getCell(2).setText(song.tone || "");
+    newRow.getCell(3).setText(song.key || "");
+    newRow.getCell(4).setText(song.music || "");
+    newRow.getCell(5).setText(song.remarks || "");
+  }
+} else {
+  return { wordUrl: null, error: "⚠️ 模板冇表格，歌曲冇更新" };
 }
+
+  doc.saveAndClose();
+
+  // ⚠️ 直接輸出 PDF
+  var newFile = templateFile.makeCopy(titleText);
+  var pdfBlob = newFile.getAs("application/pdf");
+  var pdfFile = DriveApp.createFile(pdfBlob);
+  pdfFile.setName(titleText + ".pdf");
+
+  return {
+    pdfUrl: "https://drive.google.com/uc?export=download&id=" + pdfFile.getId()
+  };
+}
+
+
+
+
+
+
+
+
+function exportFullPDF(selectedFileIds, date, session, leaderName, leaderPhone) {
+  // 1. 先生成流程表 PDF
+  const flowPdfFile = exportPDF(flowList, date, session, leaderName, leaderPhone);
+  const flowPdfId = flowPdfFile.getId();
+
+  // 2. 將流程表 PDF + 歌譜 PDF 合併
+  const allFileIds = [flowPdfId].concat(selectedFileIds);
+
+  // ⚠️ Apps Script 原生唔支援 PDF 合併，需要 Drive Advanced Service
+  // 下面係示意，實際要用 Drive API 合併 PDF
+  const resource = {
+    title: date + " " + session + " 敬拜流程合成譜.pdf",
+    mimeType: "application/pdf"
+  };
+
+  // TODO: 用 Drive API 或外部 PDF API 合併 allFileIds
+  // 暫時只係示意，唔會真合併
+  return { pdfUrl: DriveApp.getFileById(flowPdfId).getUrl() };
+}
+
 
 function findSongFiles(code) {
   if (!code) {
     throw new Error("必須傳入編號，例如 '02-021'");
   }
-  var rootFolder = DriveApp.getFolderById(CHART_ROOT_FOLDER_ID_);
+  var rootFolder = DriveApp.getFolderById("1nqixSJbc_leRJug74JLPt5xZ1i4PBzWN");
   var results = [];
 
   // 從編號前綴判斷子資料夾，例如 "02-021" → "02字"
-  var prefix = String(code).split("-")[0];
+  var prefix = code.split("-")[0]; 
   var subFolderName = prefix + "字";
 
   var subFolders = rootFolder.getFoldersByName(subFolderName);
@@ -183,68 +245,38 @@ function findSongFiles(code) {
     var files = subFolder.getFiles();
     while (files.hasNext()) {
       var file = files.next();
-      if (file.getName().indexOf(String(code)) === 0) {
-        results.push({ id: file.getId(), name: file.getName() });
+      if (file.getName().startsWith(code)) {
+        results.push({id: file.getId(), name: file.getName()});
       }
     }
   }
   return results;
 }
 
+
 function testFindSongFiles() {
   var res = findSongFiles("02-021");
   Logger.log(res);
 }
 
-/**
- * Merge selected chart PDFs into one file using pdf-lib.
- */
-async function exportSongPDF(selectedFileIds, dateStr, sessionStr) {
-  if (!selectedFileIds || !selectedFileIds.length) {
-    return { pdfUrl: null, error: "冇揀到歌譜檔案，無法合成" };
+function exportSongPDF(selectedFileIds, dateStr, sessionStr) {
+  var title = dateStr + sessionStr + "敬拜合成譜";
+  var blobs = selectedFileIds.map(id => DriveApp.getFileById(id).getBlob());
+
+  var combinedBlob = blobs[0];
+  for (var i = 1; i < blobs.length; i++) {
+    combinedBlob = Utilities.newBlob(
+      combinedBlob.getBytes().concat(blobs[i].getBytes()),
+      "application/pdf",
+      title + ".pdf"
+    );
   }
 
-  var title = String(dateStr || "") + String(sessionStr || "") + "敬拜合成譜";
-  var blobs = selectedFileIds.map(function (id) {
-    return DriveApp.getFileById(id).getBlob();
-  });
-
-  var mergedBlob = await mergePdfBlobs_(blobs, title + ".pdf");
-  var rootFolder = DriveApp.getFolderById(CHART_ROOT_FOLDER_ID_);
-  var newFile = rootFolder.createFile(mergedBlob);
-  return { pdfUrl: newFile.getUrl(), fileId: newFile.getId() };
+  var rootFolder = DriveApp.getFolderById("1nqixSJbc_leRJug74JLPt5xZ1i4PBzWN");
+  var newFile = rootFolder.createFile(combinedBlob);
+  return {pdfUrl: newFile.getUrl()};
 }
 
-/** Load pdf-lib once per execution via CDN + eval (Apps Script has no npm). */
-function ensurePdfLib_() {
-  if (typeof PDFLib !== "undefined") return;
-  var js = UrlFetchApp.fetch(PDF_LIB_CDN_)
-    .getContentText()
-    .replace(/setTimeout\(.*?,.*?(\d*?)\)/g, "Utilities.sleep($1);return t();");
-  eval(js);
-}
 
-/**
- * Merge PDF blobs with pdf-lib. Returns a Drive-ready Blob.
- */
-async function mergePdfBlobs_(blobs, outputName) {
-  ensurePdfLib_();
-  var pdfDoc = await PDFLib.PDFDocument.create();
 
-  for (var i = 0; i < blobs.length; i++) {
-    var bytes = new Uint8Array(blobs[i].getBytes());
-    var src = await PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true });
-    var pageIndices = src.getPageIndices();
-    var pages = await pdfDoc.copyPages(src, pageIndices);
-    for (var p = 0; p < pages.length; p++) {
-      pdfDoc.addPage(pages[p]);
-    }
-  }
 
-  var merged = await pdfDoc.save();
-  return Utilities.newBlob(
-    Array.from(new Uint8Array(merged)),
-    MimeType.PDF,
-    outputName || "merged.pdf"
-  );
-}
