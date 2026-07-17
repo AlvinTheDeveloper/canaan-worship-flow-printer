@@ -32,8 +32,8 @@ function searchSongs(query, mode) {
 
 var FLOW_TEMPLATE_ID_ = "1G-K5OSWBMdYb6WI1Xjn0lO85yCVgfpnvAjXkA_g2iAI";
 var CHART_ROOT_FOLDER_ID_ = "1nqixSJbc_leRJug74JLPt5xZ1i4PBzWN";
-var PDF_LIB_CDN_ =
-  "https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js";
+// pdf-lib hosted in Drive (avoids UrlFetchApp / external_request scope).
+var PDF_LIB_DRIVE_FILE_ID_ = "16D1j0XPuuB_m01rvqISsbXkZCdurNP91";
 
 function exportWord(flowList, dateStr, sessionStr, leaderName, leaderPhone) {
   var built = buildFlowDocument_(flowList, dateStr, sessionStr, leaderName, leaderPhone);
@@ -225,13 +225,15 @@ async function exportSongPDF(selectedFileIds, dateStr, sessionStr) {
   }
 }
 
-/** Load pdf-lib once per execution via CDN + eval (Apps Script has no npm). */
+/** Load pdf-lib from Drive (no UrlFetchApp / external_request needed). */
 function ensurePdfLib_() {
   if (typeof PDFLib !== "undefined") return;
-  var js = UrlFetchApp.fetch(PDF_LIB_CDN_)
-    .getContentText()
-    .replace(/setTimeout\(.*?,.*?(\d*?)\)/g, "Utilities.sleep($1);return t();");
+  var js = DriveApp.getFileById(PDF_LIB_DRIVE_FILE_ID_).getBlob().getDataAsString();
+  js = js.replace(/setTimeout\(.*?,.*?(\d*?)\)/g, "Utilities.sleep($1);return t();");
   eval(js);
+  if (typeof PDFLib === "undefined") {
+    throw new Error("pdf-lib 載入失敗（PDFLib undefined）");
+  }
 }
 
 /**
