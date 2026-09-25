@@ -15,6 +15,39 @@
     td[contenteditable="true"] { background: #fffbe6; min-width: 80px; }
     .actions { margin-top: 10px; display:flex; gap:8px; flex-wrap:wrap; }
     button { padding: 8px 10px; font-size: 16px; cursor: pointer; }
+    #songChoiceDialog {
+      display: none;
+      position: fixed;
+      left: 0; right: 0; top: 0; bottom: 0;
+      background: rgba(0,0,0,0.45);
+      z-index: 9999;
+      padding: 24px 12px;
+      box-sizing: border-box;
+      overflow: auto;
+    }
+    #songChoiceDialog .song-choice-panel {
+      background: #fff;
+      max-width: 520px;
+      margin: 10vh auto 0;
+      padding: 16px;
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+    }
+    #songChoiceDialog .song-choice-panel button {
+      display: block;
+      width: 100%;
+      margin: 8px 0;
+      text-align: left;
+      font-size: 16px;
+    }
+    #chartLookupStatus {
+      display: none;
+      margin-top: 10px;
+      padding: 10px;
+      background: #fff3cd;
+      border: 1px solid #ffeeba;
+      border-radius: 4px;
+    }
   </style>
 </head>
 <body>
@@ -59,10 +92,14 @@
     <button onclick="exportSongPDF()">輸出合成譜 PDF</button>
   </div>
 
+  <div id="chartLookupStatus"></div>
+
   <div id="songChoiceDialog">
-  <h3 id="songChoiceTitle"></h3>
-  <ul id="songChoiceList"></ul>
-</div>
+    <div class="song-choice-panel">
+      <h3 id="songChoiceTitle"></h3>
+      <ul id="songChoiceList"></ul>
+    </div>
+  </div>
 
 <h2>SongDB 清單</h2>
 <iframe 
@@ -297,14 +334,26 @@ function renderList(items) {
     }
 
     var missingChartSongs = [];
+    var selectedFileIds = [];
     var chartLookupIndex = 0;
     var chartLookupGeneration = 0;
     var chartLookupRunning = false;
-    var awaitingVersionChoice = false;
+
+    function setChartLookupStatus_(text) {
+      var el = document.getElementById("chartLookupStatus");
+      if (!el) return;
+      if (!text) {
+        el.style.display = "none";
+        el.textContent = "";
+        return;
+      }
+      el.style.display = "block";
+      el.textContent = text;
+    }
 
     function runExportFullPDF_() {
       chartLookupRunning = false;
-      awaitingVersionChoice = false;
+      setChartLookupStatus_("");
 
       const date = document.getElementById('flowDate').value;
       const session = document.getElementById('flowSession').value;
@@ -319,8 +368,10 @@ function renderList(items) {
         return;
       }
 
+      setChartLookupStatus_("正在合併流程 + 歌譜 PDF…");
       google.script.run
         .withSuccessHandler(function(res2){
+          setChartLookupStatus_("");
           console.log("後端回傳:", res2);
           if (res2 && res2.pdfUrl) {
             window.open(res2.pdfUrl, "_blank");
@@ -329,16 +380,14 @@ function renderList(items) {
           }
         })
         .withFailureHandler(function(err){
+          setChartLookupStatus_("");
           alert("輸出合成譜失敗：\n" + (err && err.message ? err.message : err));
         })
         .exportFullPDF(selectedFileIds, date, session, leaderName, leaderPhone, flowList);
     }
 
     function processNextChartLookup_(generation) {
-      // Ignore stale callbacks from an older export run.
       if (generation !== chartLookupGeneration) return;
-      // Never start the next song while the user is still choosing a version.
-      if (awaitingVersionChoice) return;
 
       if (chartLookupIndex >= flowList.length) {
         console.log("全部歌已處理，準備呼叫 exportFullPDF()");
@@ -349,11 +398,11 @@ function renderList(items) {
       var item = flowList[chartLookupIndex];
       var stepLabel = (chartLookupIndex + 1) + "/" + flowList.length;
       console.log("檢查歌:", item.code, item.name, "(" + stepLabel + ")");
+      setChartLookupStatus_("正在檢查歌譜（" + stepLabel + "）：" + (item.name || item.code || ""));
 
       google.script.run
         .withSuccessHandler(function(res){
           if (generation !== chartLookupGeneration) return;
-          if (awaitingVersionChoice) return;
 
           console.log("findSongFiles 回傳:", res);
           res = res || [];
@@ -365,10 +414,11 @@ function renderList(items) {
             processNextChartLookup_(generation);
           } else if (res.length > 1) {
             console.log("多版本，需要人工選擇 — 等待使用者");
-            awaitingVersionChoice = true;
-            showSongChoices(item.name, res, stepLabel, function() {
+            setChartLookupStatus_(
+              "請選擇「" + (item.name || item.code) + "」的歌譜版本（" + stepLabel + "）"
+            );
+            showSongChoices(item.name || item.code || "歌曲", res, stepLabel, function() {
               if (generation !== chartLookupGeneration) return;
-              awaitingVersionChoice = false;
               chartLookupIndex++;
               processNextChartLookup_(generation);
             });
@@ -381,7 +431,6 @@ function renderList(items) {
         })
         .withFailureHandler(function(err){
           if (generation !== chartLookupGeneration) return;
-          if (awaitingVersionChoice) return;
 
           missingChartSongs.push(
             (item.code || "新歌") + " " + (item.name || "") +
@@ -394,7 +443,7 @@ function renderList(items) {
     }
 
     function exportSongPDF() {
-      if (chartLookupRunning || awaitingVersionChoice) {
+      if (chartLookupRunning) {
         alert("正在處理合成譜／選擇歌譜版本，請先完成目前選擇。");
         return;
       }
@@ -405,12 +454,12 @@ function renderList(items) {
       chartLookupIndex = 0;
       chartLookupGeneration++;
       chartLookupRunning = true;
-      awaitingVersionChoice = false;
 
       console.log("開始合成譜流程，流程表歌數:", flowList.length);
 
       if (flowList.length === 0) {
         chartLookupRunning = false;
+        setChartLookupStatus_("");
         alert("輸出合成譜失敗：流程表冇歌。");
         return;
       }
@@ -421,16 +470,22 @@ function renderList(items) {
 
 function showSongChoices(songName, choices, stepLabel, onChosen) {
   var dialog = document.getElementById("songChoiceDialog");
-  document.getElementById("songChoiceTitle").textContent =
-    "請選擇「" + songName + "」的歌譜版本（" + stepLabel + "）— 揀完先會去下一首";
   var list = document.getElementById("songChoiceList");
+  var chosen = false;
+
+  document.getElementById("songChoiceTitle").textContent =
+    "請選擇「" + songName + "」的歌譜版本（" + stepLabel + "）";
   list.innerHTML = "";
+
   choices.forEach(function(choice){
     var li = document.createElement("li");
     var btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = choice.name;
-    btn.onclick = function(){
+    btn.onclick = function(e){
+      if (e && e.preventDefault) e.preventDefault();
+      if (chosen) return;
+      chosen = true;
       selectedFileIds.push(choice.id);
       dialog.style.display = "none";
       console.log("已選擇:", choice.name);
@@ -439,7 +494,11 @@ function showSongChoices(songName, choices, stepLabel, onChosen) {
     li.appendChild(btn);
     list.appendChild(li);
   });
+
   dialog.style.display = "block";
+  try {
+    dialog.scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (err) {}
 }
 
 
