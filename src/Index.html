@@ -297,6 +297,7 @@ function renderList(items) {
     }
 
     var missingChartSongs = [];
+    var chartLookupIndex = 0;
 
     function runExportFullPDF_() {
       const date = document.getElementById('flowDate').value;
@@ -327,62 +328,69 @@ function renderList(items) {
         .exportFullPDF(selectedFileIds, date, session, leaderName, leaderPhone, flowList);
     }
 
+    function advanceChartLookup_() {
+      chartLookupIndex++;
+      processNextChartLookup_();
+    }
+
+    function processNextChartLookup_() {
+      if (chartLookupIndex >= flowList.length) {
+        console.log("全部歌已處理，準備呼叫 exportFullPDF()");
+        runExportFullPDF_();
+        return;
+      }
+
+      var item = flowList[chartLookupIndex];
+      console.log("檢查歌:", item.code, item.name, "(" + (chartLookupIndex + 1) + "/" + flowList.length + ")");
+
+      google.script.run
+        .withSuccessHandler(function(res){
+          console.log("findSongFiles 回傳:", res);
+          res = res || [];
+
+          if (res.length === 1) {
+            selectedFileIds.push(res[0].id);
+            console.log("自動選擇:", res[0].name);
+            advanceChartLookup_();
+          } else if (res.length > 1) {
+            console.log("多版本，需要人工選擇");
+            showSongChoices(item.name, res, advanceChartLookup_);
+          } else {
+            console.log("找不到檔案:", item.code);
+            missingChartSongs.push((item.code || "新歌") + " " + (item.name || ""));
+            advanceChartLookup_();
+          }
+        })
+        .withFailureHandler(function(err){
+          missingChartSongs.push(
+            (item.code || "新歌") + " " + (item.name || "") +
+            "（" + (err && err.message ? err.message : err) + "）"
+          );
+          advanceChartLookup_();
+        })
+        .findSongFiles(item.code);
+    }
+
     function exportSongPDF() {
       syncFlowFromTable();
       selectedFileIds = [];
       missingChartSongs = [];
+      chartLookupIndex = 0;
 
-      // ✅ 就係呢度：流程表歌數量
-      pending = flowList.length;
+      console.log("開始合成譜流程，流程表歌數:", flowList.length);
 
-      console.log("開始合成譜流程，流程表歌數:", pending);
-
-      if (pending === 0) {
+      if (flowList.length === 0) {
         alert("輸出合成譜失敗：流程表冇歌。");
         return;
       }
 
-      flowList.forEach(item => {
-        console.log("檢查歌:", item.code, item.name);
-
-        google.script.run
-          .withSuccessHandler(function(res){
-            console.log("findSongFiles 回傳:", res);
-            res = res || [];
-
-            if (res.length === 1) {
-              selectedFileIds.push(res[0].id);
-              console.log("自動選擇:", res[0].name);
-              pending--;
-            } else if (res.length > 1) {
-              console.log("多版本，需要人工選擇");
-              showSongChoices(item.name, res);
-              return;
-            } else {
-              console.log("找不到檔案:", item.code);
-              missingChartSongs.push((item.code || "新歌") + " " + (item.name || ""));
-              pending--;
-            }
-
-            if (pending === 0) {
-              console.log("全部歌已處理，準備呼叫 exportFullPDF()");
-              runExportFullPDF_();
-            }
-          })
-          .withFailureHandler(function(err){
-            missingChartSongs.push(
-              (item.code || "新歌") + " " + (item.name || "") +
-              "（" + (err && err.message ? err.message : err) + "）"
-            );
-            pending--;
-            if (pending === 0) runExportFullPDF_();
-          })
-          .findSongFiles(item.code);
-      });
+      // Process songs one-by-one so version pickers do not overwrite each other.
+      processNextChartLookup_();
     }
 
-function showSongChoices(songName, choices) {
-  document.getElementById("songChoiceTitle").textContent = "請選擇「" + songName + "」的歌譜版本";
+function showSongChoices(songName, choices, onChosen) {
+  document.getElementById("songChoiceTitle").textContent =
+    "請選擇「" + songName + "」的歌譜版本（" + (chartLookupIndex + 1) + "/" + flowList.length + "）";
   var list = document.getElementById("songChoiceList");
   list.innerHTML = "";
   choices.forEach(function(choice){
@@ -392,13 +400,8 @@ function showSongChoices(songName, choices) {
     btn.onclick = function(){
       selectedFileIds.push(choice.id);
       document.getElementById("songChoiceDialog").style.display = "none";
-      alert("已選擇：" + choice.name);
-
-      // ✅ 檢查是否所有歌都已揀好
-      pending--;
-      if (pending === 0) {
-        runExportFullPDF_();
-      }
+      console.log("已選擇:", choice.name);
+      if (typeof onChosen === "function") onChosen();
     };
     li.appendChild(btn);
     list.appendChild(li);
